@@ -1,0 +1,16 @@
+pragma language_version >= 0.20;
+import CompactStandardLibrary;
+
+export ledger name: Opaque<"string">;
+export ledger RoomNumber: uint<32>;
+export ledger RoomStatus: Boolean;
+export ledger StartDate: Uint<64>;
+export ledger EndDate: Uint<64>;
+
+export circuit StoreBooking (NewName: Opaque<"string">, NewRoomNumber: uint<32>, NewRoomStatus: Boolean, NewStartDate: Uint<64>, NewEndDate: Uint<64>): [] {
+name = disclose(NewName);
+RoomNumber = disclose(NewRoomNumber);
+RoomStatus = disclose(NewRoomStatus);
+StartDate = disclose(NewStartDate);
+EndDate = disclose(NewEndDate);
+}
