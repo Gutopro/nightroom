@@ -1,16 +1,427 @@
-pragma language_version >= 0.20;
+pragma language_version >= 0.22;
+
 import CompactStandardLibrary;
 
-export ledger name: Opaque<"string">;
-export ledger RoomNumber: Uint<32>;
-export ledger RoomStatus: Boolean;
-export ledger StartDate: Uint<64>;
-export ledger EndDate: Uint<64>;
+export enum RoomStatus {
+  Available,
+  Booked
+}
 
-export circuit StoreBooking (NewName: Opaque<"string">, NewRoomNumber: Uint<32>, NewRoomStatus: Boolean, NewStartDate: Uint<64>, NewEndDate: Uint<64>): [] {
-name = disclose(NewName);
-RoomNumber = disclose(NewRoomNumber);
-RoomStatus = disclose(NewRoomStatus);
-StartDate = disclose(NewStartDate);
-EndDate = disclose(NewEndDate);
+export enum CheckoutStatus {
+  Pending,
+  GuestConfirmed,
+  Completed
+}
+
+export struct Room {
+  room_number:          Uint<8>,
+  price_per_night:      Uint<64>,
+  description:          Opaque<"string">,
+  status:               RoomStatus,
+  has_booking:          Boolean,
+  booking_commitment:   Bytes<32>,
+  check_in_date:        Uint<32>,
+  check_out_date:       Uint<32>,
+  checkout_status:      CheckoutStatus,
+  caution_fee:          Uint<64>,
+  caution_escrowed:     Uint<128>,
+  booking_escrowed:     Uint<128>,
+  total_nights:         Uint<16>,
+  damage_claim_count:   Uint<16>
+}
+
+export struct Owner {
+  is_verified:             Boolean,
+  verification_commitment: Bytes<32>
+}
+
+export ledger owner: Owner;
+export ledger rooms: Map<Uint<32>, Room>;
+export ledger room_counter: Counter;
+
+witness owner_tax_id(): Bytes<32>;
+witness guest_secret(): Bytes<32>;
+witness current_timestamp(): Uint<32>;
+
+constructor(
+  initial_is_verified:             Boolean,
+  initial_verification_commitment: Bytes<32>
+) {
+  owner = disclose(Owner {
+    is_verified:             initial_is_verified,
+    verification_commitment: initial_verification_commitment
+  });
+  room_counter.increment(1);
+}
+
+export pure circuit compute_verification_commitment(
+  tax_id: Bytes<32>,
+  nonce:  Bytes<32>
+): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>(
+    [pad(32, "booking:owner:"), nonce, tax_id]
+  );
+}
+
+export pure circuit compute_booking_commitment(
+  secret:   Bytes<32>,
+  room_id:  Bytes<32>,
+  check_in: Bytes<32>
+): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>(
+    [pad(32, "booking:guest:"), room_id, secret]
+  );
+}
+
+export pure circuit uint32_to_bytes32(value: Uint<32>): Bytes<32> {
+  return value as Field as Bytes<32>;
+}
+
+export pure circuit compute_amount_owed(
+  price_per_night: Uint<64>,
+  nights_stayed:   Uint<16>
+): Uint<128> {
+  return price_per_night * (nights_stayed as Uint<64>);
+}
+
+// ============================================================
+// CIRCUIT 1 — List a Room (Owner)
+// ============================================================
+
+export circuit list_room(
+  room_number:     Uint<8>,
+  price_per_night: Uint<64>,
+  description:     Opaque<"string">,
+  caution_fee:     Uint<64>,
+  owner_nonce:     Bytes<32>
+): [] {
+  const tax_id              = owner_tax_id();
+  const expected_commitment = compute_verification_commitment(tax_id, owner_nonce);
+
+  assert(owner.is_verified, "Owner is not verified");
+  assert(
+    owner.verification_commitment == expected_commitment,
+    "Owner identity proof failed"
+  );
+  assert(price_per_night > 0, "Price must be greater than zero");
+  assert(room_number > 0, "Room number must be greater than zero");
+  assert(caution_fee > 0, "Caution fee must be greater than zero");
+
+  const room_id = room_counter as Field as Uint<32>;
+  room_counter.increment(1);
+
+  rooms.insert(
+    disclose(room_id),
+    disclose(Room {
+      room_number:        room_number,
+      price_per_night:    price_per_night,
+      description:        description,
+      status:             RoomStatus.Available,
+      has_booking:        false,
+      booking_commitment: pad(32, ""),
+      check_in_date:      0,
+      check_out_date:     0,
+      checkout_status:    CheckoutStatus.Pending,
+      caution_fee:        caution_fee,
+      caution_escrowed:   0,
+      booking_escrowed:   0,
+      total_nights:       0,
+      damage_claim_count: 0
+    })
+  );
+}
+
+// ============================================================
+// CIRCUIT 2 — Book a Room (Guest)
+// ============================================================
+
+export circuit book_room(
+  room_id:             Uint<32>,
+  requested_check_in:  Uint<32>,
+  requested_check_out: Uint<32>,
+  number_of_nights:    Uint<16>,
+  total_payment:       Uint<128>
+): [] {
+  const room = rooms.lookup(disclose(room_id));
+
+  assert(room.status == RoomStatus.Available, "Room is not available");
+  assert(requested_check_in < requested_check_out, "Invalid date range");
+  assert(number_of_nights > 0, "Number of nights must be greater than zero");
+  assert(
+    total_payment == room.price_per_night * (number_of_nights as Uint<64>),
+    "Incorrect payment amount"
+  );
+
+  const secret     = guest_secret();
+  const room_id_b  = uint32_to_bytes32(room_id);
+  const checkin_b  = uint32_to_bytes32(requested_check_in);
+  const commitment = compute_booking_commitment(secret, room_id_b, checkin_b);
+
+  rooms.insert(
+    disclose(room_id),
+    disclose(Room {
+      room_number:        room.room_number,
+      price_per_night:    room.price_per_night,
+      description:        room.description,
+      status:             RoomStatus.Booked,
+      has_booking:        true,
+      booking_commitment: commitment,
+      check_in_date:      requested_check_in,
+      check_out_date:     requested_check_out,
+      checkout_status:    CheckoutStatus.Pending,
+      caution_fee:        room.caution_fee,
+      caution_escrowed:   room.caution_fee as Uint<128>,
+      booking_escrowed:   total_payment,
+      total_nights:       number_of_nights,
+      damage_claim_count: room.damage_claim_count
+    })
+  );
+}
+
+// ============================================================
+// CIRCUIT 3a — Guest Cancels Booking
+// ============================================================
+
+export circuit guest_cancel_booking(
+  room_id:       Uint<32>,
+  nights_stayed: Uint<16>
+): [] {
+  const room = rooms.lookup(disclose(room_id));
+
+  assert(room.status == RoomStatus.Booked, "Room has no active booking");
+  assert(
+    nights_stayed <= room.total_nights,
+    "Nights stayed exceeds total booking nights"
+  );
+
+  const secret    = guest_secret();
+  const room_id_b = uint32_to_bytes32(room_id);
+  const checkin_b = uint32_to_bytes32(room.check_in_date);
+  const expected  = compute_booking_commitment(secret, room_id_b, checkin_b);
+  assert(
+    room.booking_commitment == expected,
+    "Guest identity proof failed: not the original booker"
+  );
+
+  rooms.insert(
+    disclose(room_id),
+    disclose(Room {
+      room_number:        room.room_number,
+      price_per_night:    room.price_per_night,
+      description:        room.description,
+      status:             RoomStatus.Available,
+      has_booking:        false,
+      booking_commitment: pad(32, ""),
+      check_in_date:      0,
+      check_out_date:     0,
+      checkout_status:    CheckoutStatus.Pending,
+      caution_fee:        room.caution_fee,
+      caution_escrowed:   0,
+      booking_escrowed:   0,
+      total_nights:       0,
+      damage_claim_count: room.damage_claim_count
+    })
+  );
+}
+
+// ============================================================
+// CIRCUIT 3b — Owner Cancels Booking
+// ============================================================
+
+export circuit owner_cancel_booking(
+  room_id:       Uint<32>,
+  nights_stayed: Uint<16>,
+  owner_nonce:   Bytes<32>
+): [] {
+  const room = rooms.lookup(disclose(room_id));
+
+  assert(room.status == RoomStatus.Booked, "Room has no active booking");
+  assert(room.has_booking, "No active booking to cancel");
+  assert(
+    nights_stayed <= room.total_nights,
+    "Nights stayed exceeds total booking nights"
+  );
+
+  const tax_id   = owner_tax_id();
+  const expected = compute_verification_commitment(tax_id, owner_nonce);
+  assert(
+    owner.verification_commitment == expected,
+    "Owner identity proof failed"
+  );
+
+  rooms.insert(
+    disclose(room_id),
+    disclose(Room {
+      room_number:        room.room_number,
+      price_per_night:    room.price_per_night,
+      description:        room.description,
+      status:             RoomStatus.Available,
+      has_booking:        false,
+      booking_commitment: pad(32, ""),
+      check_in_date:      0,
+      check_out_date:     0,
+      checkout_status:    CheckoutStatus.Pending,
+      caution_fee:        room.caution_fee,
+      caution_escrowed:   0,
+      booking_escrowed:   0,
+      total_nights:       0,
+      damage_claim_count: room.damage_claim_count
+    })
+  );
+}
+
+// ============================================================
+// CIRCUIT 4a — Guest Confirms Evacuation
+// ============================================================
+
+export circuit guest_confirm_checkout(
+  room_id: Uint<32>
+): [] {
+  const room = rooms.lookup(disclose(room_id));
+  const now  = current_timestamp();
+
+  assert(room.status == RoomStatus.Booked, "Room has no active booking");
+  assert(
+    room.checkout_status == CheckoutStatus.Pending,
+    "Guest has already confirmed checkout"
+  );
+  assert(now >= room.check_out_date, "Stay has not yet ended");
+
+  const secret    = guest_secret();
+  const room_id_b = uint32_to_bytes32(room_id);
+  const checkin_b = uint32_to_bytes32(room.check_in_date);
+  const expected  = compute_booking_commitment(secret, room_id_b, checkin_b);
+  assert(
+    room.booking_commitment == expected,
+    "Guest identity proof failed"
+  );
+
+  rooms.insert(
+    disclose(room_id),
+    disclose(Room {
+      room_number:        room.room_number,
+      price_per_night:    room.price_per_night,
+      description:        room.description,
+      status:             room.status,
+      has_booking:        room.has_booking,
+      booking_commitment: room.booking_commitment,
+      check_in_date:      room.check_in_date,
+      check_out_date:     room.check_out_date,
+      checkout_status:    CheckoutStatus.GuestConfirmed,
+      caution_fee:        room.caution_fee,
+      caution_escrowed:   room.caution_escrowed,
+      booking_escrowed:   room.booking_escrowed,
+      total_nights:       room.total_nights,
+      damage_claim_count: room.damage_claim_count
+    })
+  );
+}
+
+// ============================================================
+// CIRCUIT 4b — Owner Confirms Property Integrity
+// ============================================================
+
+export circuit owner_confirm_checkout(
+  room_id:          Uint<32>,
+  new_damage_count: Uint<16>,
+  owner_nonce:      Bytes<32>
+): [] {
+  const room = rooms.lookup(disclose(room_id));
+  const now  = current_timestamp();
+
+  assert(room.status == RoomStatus.Booked, "Room has no active booking");
+  assert(
+    room.checkout_status == CheckoutStatus.GuestConfirmed,
+    "Guest has not confirmed checkout yet"
+  );
+  assert(now >= room.check_out_date, "Stay has not yet ended");
+  assert(
+    new_damage_count == room.damage_claim_count
+    || new_damage_count == room.damage_claim_count + 1,
+    "Invalid damage count"
+  );
+
+  const tax_id   = owner_tax_id();
+  const expected = compute_verification_commitment(tax_id, owner_nonce);
+  assert(
+    owner.verification_commitment == expected,
+    "Owner identity proof failed"
+  );
+
+  rooms.insert(
+    disclose(room_id),
+    disclose(Room {
+      room_number:        room.room_number,
+      price_per_night:    room.price_per_night,
+      description:        room.description,
+      status:             RoomStatus.Available,
+      has_booking:        false,
+      booking_commitment: pad(32, ""),
+      check_in_date:      0,
+      check_out_date:     0,
+      checkout_status:    CheckoutStatus.Pending,
+      caution_fee:        room.caution_fee,
+      caution_escrowed:   0,
+      booking_escrowed:   0,
+      total_nights:       0,
+      damage_claim_count: new_damage_count
+    })
+  );
+}
+
+// ============================================================
+// CIRCUIT 4c — Time-lock Fallback: Guest Ghosts
+// ============================================================
+
+export circuit owner_force_checkout(
+  room_id:          Uint<32>,
+  new_damage_count: Uint<16>,
+  owner_nonce:      Bytes<32>
+): [] {
+  const room = rooms.lookup(disclose(room_id));
+  const now  = current_timestamp();
+
+  assert(room.status == RoomStatus.Booked, "Room has no active booking");
+  assert(
+    room.checkout_status == CheckoutStatus.Pending,
+    "Guest already confirmed — use owner_confirm_checkout instead"
+  );
+
+  const grace_period: Uint<32> = 172800;
+  assert(
+    now >= room.check_out_date + grace_period,
+    "Grace period has not elapsed yet"
+  );
+  assert(
+    new_damage_count == room.damage_claim_count
+    || new_damage_count == room.damage_claim_count + 1,
+    "Invalid damage count"
+  );
+
+  const tax_id   = owner_tax_id();
+  const expected = compute_verification_commitment(tax_id, owner_nonce);
+  assert(
+    owner.verification_commitment == expected,
+    "Owner identity proof failed"
+  );
+
+  rooms.insert(
+    disclose(room_id),
+    disclose(Room {
+      room_number:        room.room_number,
+      price_per_night:    room.price_per_night,
+      description:        room.description,
+      status:             RoomStatus.Available,
+      has_booking:        false,
+      booking_commitment: pad(32, ""),
+      check_in_date:      0,
+      check_out_date:     0,
+      checkout_status:    CheckoutStatus.Pending,
+      caution_fee:        room.caution_fee,
+      caution_escrowed:   0,
+      booking_escrowed:   0,
+      total_nights:       0,
+      damage_claim_count: new_damage_count
+    })
+  );
 }

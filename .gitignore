@@ -1,48 +1,22 @@
-# Dependencies
 node_modules/
-
-# Build outputs
+**/node_modules/
 dist/
-build/
-
-# Midnight compiled contract artifacts
-contracts/managed/
-src/managed/
-
-# Deployment & wallet sensitive files
-deployment.json
-*.seed
+**/dist/
 .env
 .env.*
 !.env.example
-
-# Private state storage
-*-state/
+deployment.json
+deployed-address.txt
+midnight-level-db/
+**/midnight-level-db/
 *.ldb
-*.log
-LOCK
 MANIFEST-*
-CURRENT
-OPTIONS-*
-
-# TypeScript cache
-*.tsbuildinfo
-tsconfig.tsbuildinfo
-
-# OS files
+LOCK
+LOG
+LOG.old
+contracts/managed/
 .DS_Store
 Thumbs.db
-
-# Editor
 .vscode/
 .idea/
 *.swp
-*.swo
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-
-# Test coverage
-coverage/
