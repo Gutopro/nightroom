@@ -1,6 +1,6 @@
 # nightroom 🌙
 
-A privacy-preserving room rental protocol on [Midnight Network](https://midnight.network). Owners list rooms, guests book them — with ZK proofs ensuring identity verification without exposing sensitive data on-chain.
+A privacy-preserving room rental protocol on [Midnight Network](https://midnight.network). Owners list rooms, guests book them — with ZK proofs ensuring identity verification without exposing sensitive data on-chain.This project is built on the Midnight Network.
 
 ## Privacy design
 
@@ -53,6 +53,11 @@ Run the interactive CLI:
     DEPLOYER_MNEMONIC="your 24 words" OWNER_TAX_ID="your-tax-id" yarn cli
 
 The CLI auto-connects to the last deployed contract and presents a hierarchical menu covering all contract interactions — list rooms, book, cancel, checkout, and view state.
+
+## Status
+Contracts: compiled and tested end-to-end ✓
+CLI: full interaction flow working ✓
+Frontend: in progress
 
 ## Security notes
 
