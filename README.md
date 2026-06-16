@@ -1,6 +1,6 @@
 # nightroom 🌙
 
-A privacy-preserving room rental protocol on [Midnight Network](https://midnight.network). Owners list rooms, guests book them — with ZK proofs ensuring identity verification without exposing sensitive data on-chain.This project is built on the Midnight Network.
+A privacy-preserving room rental protocol on [Midnight Network](https://midnight.network). Owners list rooms, guests book them — with ZK proofs ensuring identity verification without exposing sensitive data on-chain. This project is built on the Midnight Network.
 
 ## Privacy design
 
