@@ -55,9 +55,10 @@ Run the interactive CLI:
 The CLI auto-connects to the last deployed contract and presents a hierarchical menu covering all contract interactions — list rooms, book, cancel, checkout, and view state.
 
 ## Status
-Contracts: compiled and tested end-to-end ✓
-CLI: full interaction flow working ✓
-Frontend: in progress
+
+- Contracts: compiled and tested end-to-end ✓
+- CLI: full interaction flow working ✓
+- Frontend: in progress
 
 ## Security notes
 
