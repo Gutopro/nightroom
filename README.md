@@ -42,7 +42,19 @@ A privacy-preserving room rental protocol on [Midnight Network](https://midnight
 
 ## Quick start
 
-Start the proof server with yarn proof-server:start, then compile the contract with yarn compile.
+Start the [local development network](https://github.com/midnightntwrk/midnight-local-dev)
+
+
+In a new terminal clone this repository
+
+
+Install dependencies:
+
+    npm install
+
+Compile the contract:
+
+    compact compile nightroom.compact managed/nightroom
 
 Deploy the contract:
 
