@@ -237,7 +237,7 @@ async function registerDust(ctx: WalletContext): Promise<void> {
 function buildProviders(ctx: WalletContext) {
   setNetworkId(NETWORK_ID);
 
-  const zkConfigProvider = new NodeZkConfigProvider('/home/guto/nightroom/contracts/managed/nightroom') as any;
+  const zkConfigProvider = new NodeZkConfigProvider(ZK_CONFIG_PATH) as any;
 
   const walletAndMidnight = {
     getCoinPublicKey:       () => ctx.shieldedSecretKeys.coinPublicKey,
